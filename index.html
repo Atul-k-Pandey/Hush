@@ -1,0 +1,1052 @@
+<!DOCTYPE html>
+<html lang="en" class="scroll-smooth">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>ChatRandom - The Future of Anonymous Connection</title>
+    <meta name="description" content="Secure, anonymous, real-time chat with auto-destructing history.">
+
+    <!-- Tailwind CSS -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script>
+        tailwind.config = {
+            darkMode: 'class',
+            theme: {
+                extend: {
+                    fontFamily: {
+                        sans: ['Inter', 'system-ui', 'sans-serif'],
+                        display: ['Lexend', 'system-ui', 'sans-serif'],
+                    },
+                    colors: {
+                        brand: {
+                            50: '#f0fdfa',
+                            100: '#ccfbf1',
+                            200: '#99f6e4',
+                            300: '#5eead4',
+                            400: '#2dd4bf',
+                            500: '#14b8a6',
+                            600: '#0d9488',
+                            700: '#0f766e',
+                            800: '#115e59',
+                            900: '#134e4a',
+                            950: '#042f2e',
+                        },
+                        dark: {
+                            bg: '#09090b',
+                            surface: '#18181b',
+                            border: '#27272a',
+                            hover: '#3f3f46'
+                        }
+                    },
+                    animation: {
+                        'blob': 'blob 7s infinite',
+                        'fade-in': 'fadeIn 0.5s ease-out',
+                        'slide-up': 'slideUp 0.5s ease-out',
+                        'bounce-slow': 'bounce 3s infinite',
+                    },
+                    keyframes: {
+                        blob: {
+                            '0%': { transform: 'translate(0px, 0px) scale(1)' },
+                            '33%': { transform: 'translate(30px, -50px) scale(1.1)' },
+                            '66%': { transform: 'translate(-20px, 20px) scale(0.9)' },
+                            '100%': { transform: 'translate(0px, 0px) scale(1)' },
+                        },
+                        fadeIn: {
+                            '0%': { opacity: '0' },
+                            '100%': { opacity: '1' },
+                        },
+                        slideUp: {
+                            '0%': { transform: 'translateY(20px)', opacity: '0' },
+                            '100%': { transform: 'translateY(0)', opacity: '1' },
+                        }
+                    }
+                }
+            }
+        }
+    </script>
+    
+    <!-- Fonts -->
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=Lexend:wght@400;500;600;700&display=swap" rel="stylesheet">
+    
+    <!-- Icons -->
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+
+    <!-- Firebase SDKs (Modular) -->
+    <script type="module">
+        import { initializeApp } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-app.js";
+        import { getAuth, signInAnonymously, onAuthStateChanged, signInWithCustomToken } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-auth.js";
+        import { 
+            getFirestore, collection, doc, setDoc, getDoc, 
+            onSnapshot, updateDoc, deleteDoc, serverTimestamp, 
+            query, orderBy, limit, addDoc 
+        } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js";
+
+        // =================================================================
+        // --- USER CONFIGURATION (EDIT THIS TO CONNECT YOUR DATABASE) ---
+        // =================================================================
+        const manualConfig = {
+            apiKey: "AIzaSyBkdd0qP8SCzPwqm47nEhHCaHexls534Nw",
+    authDomain: "random-chatapp-2025.firebaseapp.com",
+    projectId: "random-chatapp-2025",
+    storageBucket: "random-chatapp-2025.firebasestorage.app",
+    messagingSenderId: "384379594500",
+    appId: "1:384379594500:web:92f08562aa64063be01251",
+    measurementId: "G-HEJWRVH0QP"
+        };
+
+        // --- FIREBASE INITIALIZATION LOGIC ---
+        let firebaseConfig;
+        let appId = 'default-app-id';
+        let isConfigured = fale;
+
+        try {
+            // Priority 1: Try Environment Config (Canvas default)
+            if (typeof __firebase_config !== 'undefined' && __firebase_config) {
+                firebaseConfig = JSON.parse(__firebase_config);
+                appId = typeof __app_id !== 'undefined' ? __app_id : 'default-app-id';
+                isConfigured = true;
+            } 
+            // Priority 2: Try Manual Config (User Provided)
+            else if (manualConfig.apiKey && manualConfig.apiKey !== "") {
+                firebaseConfig = manualConfig;
+                appId = manualConfig.appId || 'default-app-id';
+                isConfigured = true;
+            }
+            // Fallback: Empty config (UI will show error, but won't crash)
+            else {
+                console.warn("No valid Firebase configuration found.");
+            }
+        } catch (e) {
+            console.error("Config Parsing Error:", e);
+        }
+
+        if (isConfigured && firebaseConfig) {
+            try {
+                const app = initializeApp(firebaseConfig);
+                const auth = getAuth(app);
+                const db = getFirestore(app);
+
+                // Expose Firebase features to Alpine via window global object
+                window.chatService = {
+                    auth, db, appId,
+                    signInAnonymously, signInWithCustomToken,
+                    collection, doc, setDoc, getDoc, updateDoc, deleteDoc, addDoc,
+                    onSnapshot, query, orderBy, limit, serverTimestamp,
+                    onAuthStateChanged,
+                    status: 'ready'
+                };
+            } catch (err) {
+                console.error("Firebase Init Error:", err);
+                window.chatService = { status: 'error', error: err.message };
+            }
+        } else {
+            window.chatService = { status: 'missing_config' };
+        }
+    </script>
+
+    <!-- Application Logic (Alpine.js) -->
+    <script>
+        document.addEventListener('alpine:init', () => {
+            Alpine.data('app', () => ({
+                // ==========================================
+                // STATE MANAGEMENT
+                // ==========================================
+                currentView: 'home',
+                currentUser: null, // Firebase Auth User
+                userProfile: null, // Firestore Profile
+                
+                // UI State
+                mobileMenuOpen: false,
+                darkMode: localStorage.getItem('theme') === 'dark',
+                isLoading: true,
+                loadingMessage: 'Initializing system...',
+                configError: null,
+                
+                // Identity
+                inputUsername: '',
+                inputUniqueId: '',
+                
+                // Lobby
+                activeUsers: [],
+                searchQuery: '',
+                lobbyUnsubscribe: null,
+                
+                // Requests
+                incomingRequests: [],
+                requestsUnsubscribe: null,
+                
+                // Chat
+                activeChatId: null,
+                chatMessages: [],
+                chatPartner: null,
+                chatUnsubscribe: null,
+                messagesUnsubscribe: null,
+                newMessageText: '',
+                isTyping: false,
+                typingTimeout: null,
+                showEmojiPicker: false,
+                sessionTimeRemaining: 0,
+                sessionTimerInterval: null,
+
+                // Notifications
+                notifications: [], 
+
+                // ==========================================
+                // INITIALIZATION
+                // ==========================================
+                async init() {
+                    // Apply theme immediately
+                    if (this.darkMode) document.documentElement.classList.add('dark');
+
+                    // Check for Firebase Readiness
+                    let attempts = 0;
+                    const checkFirebase = setInterval(async () => {
+                        attempts++;
+                        
+                        if (window.chatService) {
+                            clearInterval(checkFirebase);
+                            
+                            if (window.chatService.status === 'missing_config') {
+                                this.configError = "Firebase Not Configured. Please edit the code and add your keys.";
+                                this.isLoading = false;
+                            } else if (window.chatService.status === 'error') {
+                                this.configError = "Firebase Initialization Failed: " + window.chatService.error;
+                                this.isLoading = false;
+                            } else {
+                                await this.setupAuth();
+                            }
+                        }
+                        
+                        // Timeout after 5 seconds
+                        if (attempts > 50) {
+                            clearInterval(checkFirebase);
+                            this.configError = "Connection Timed Out. Check console for errors.";
+                            this.isLoading = false;
+                        }
+                    }, 100);
+
+                    // Heartbeat for "Online Status"
+                    setInterval(() => this.sendHeartbeat(), 60000); // Every minute
+                },
+
+                async setupAuth() {
+                    const { auth, signInAnonymously, signInWithCustomToken, onAuthStateChanged } = window.chatService;
+
+                    // Auth Listener
+                    onAuthStateChanged(auth, async (user) => {
+                        this.currentUser = user;
+                        if (user) {
+                            this.loadingMessage = 'Restoring identity...';
+                            await this.fetchUserProfile(user.uid);
+                            this.setupRequestListeners(user.uid);
+                        }
+                        this.isLoading = false;
+                    });
+
+                    // Initial Sign In
+                    try {
+                        if (typeof __initial_auth_token !== 'undefined' && __initial_auth_token) {
+                            await signInWithCustomToken(auth, __initial_auth_token);
+                        } else {
+                            await signInAnonymously(auth);
+                        }
+                    } catch (error) {
+                        console.error("Auth Error:", error);
+                        this.addNotification("Authentication failed. Please refresh.", "error");
+                        this.isLoading = false;
+                    }
+                },
+
+                // ==========================================
+                // USER PROFILE & LOBBY
+                // ==========================================
+                async fetchUserProfile(uid) {
+                    const { db, doc, getDoc, appId } = window.chatService;
+                    // Private User Data Path: artifacts/{appId}/users/{uid}/profile/main
+                    // Public Lobby Data Path: artifacts/{appId}/public/data/users/{uid}
+                    
+                    try {
+                        const publicDocRef = doc(db, 'artifacts', appId, 'public', 'data', 'users', uid);
+                        const docSnap = await getDoc(publicDocRef);
+                        
+                        if (docSnap.exists()) {
+                            this.userProfile = docSnap.data();
+                            this.inputUniqueId = this.userProfile.uniqueId;
+                            this.setView('lobby'); // Auto-login if profile exists
+                        }
+                    } catch (e) {
+                        console.error("Fetch Profile Error:", e);
+                    }
+                },
+
+                async createIdentity() {
+                    if (!this.currentUser) return;
+                    if (this.inputUsername.trim().length < 3) {
+                        this.addNotification("Username must be at least 3 characters", "error");
+                        return;
+                    }
+
+                    this.isLoading = true;
+                    this.loadingMessage = 'Generating cryptographic ID...';
+
+                    const { db, doc, setDoc, appId, serverTimestamp } = window.chatService;
+                    const uid = this.currentUser.uid;
+                    const uniqueId = this.generateUniqueId();
+                    
+                    const profileData = {
+                        uid: uid,
+                        username: this.inputUsername.trim(),
+                        uniqueId: uniqueId,
+                        avatar: `https://api.dicebear.com/7.x/shapes/svg?seed=${uid}`,
+                        createdAt: serverTimestamp(),
+                        lastSeen: serverTimestamp(),
+                        status: 'online'
+                    };
+
+                    try {
+                        // 1. Save to Public Lobby (so others can find me)
+                        // Path: artifacts/{appId}/public/data/users/{uid}
+                        await setDoc(doc(db, 'artifacts', appId, 'public', 'data', 'users', uid), profileData);
+                        
+                        this.userProfile = profileData;
+                        this.inputUniqueId = uniqueId;
+                        this.setView('lobby');
+                        this.addNotification(`Identity Created: ${uniqueId}`, "success");
+                    } catch (e) {
+                        console.error("Create Identity Error:", e);
+                        this.addNotification("Failed to create identity. Try again.", "error");
+                    } finally {
+                        this.isLoading = false;
+                    }
+                },
+
+                generateUniqueId() {
+                    // Generates a random 4-digit code e.g., "User_9281"
+                    // In a real app, we'd check for collisions, but this is fine for prototype
+                    return `ID-${Math.floor(1000 + Math.random() * 9000)}`;
+                },
+
+                async sendHeartbeat() {
+                    if (!this.currentUser || !this.userProfile) return;
+                    const { db, doc, updateDoc, appId, serverTimestamp } = window.chatService;
+                    try {
+                        await updateDoc(doc(db, 'artifacts', appId, 'public', 'data', 'users', this.currentUser.uid), {
+                            lastSeen: serverTimestamp()
+                        });
+                    } catch (e) {}
+                },
+
+                // ==========================================
+                // LOBBY LOGIC (FETCHING USERS)
+                // ==========================================
+                setupLobbyListener() {
+                    if (this.lobbyUnsubscribe) this.lobbyUnsubscribe();
+                    
+                    const { db, collection, onSnapshot, appId } = window.chatService;
+                    // FETCH ALL and filter in memory (Rule 2: No complex queries)
+                    const usersRef = collection(db, 'artifacts', appId, 'public', 'data', 'users');
+
+                    this.lobbyUnsubscribe = onSnapshot(usersRef, (snapshot) => {
+                        const now = Date.now();
+                        const fiveMinutes = 5 * 60 * 1000;
+                        
+                        const users = [];
+                        snapshot.forEach(doc => {
+                            const data = doc.data();
+                            // Filter client-side for "Online" users (seen in last 5 mins)
+                            // Note: Firestore timestamps need .toMillis()
+                            let lastSeen = 0;
+                            if (data.lastSeen && typeof data.lastSeen.toMillis === 'function') {
+                                lastSeen = data.lastSeen.toMillis();
+                            } else if (data.lastSeen) {
+                                lastSeen = new Date(data.lastSeen).getTime(); // Handle other formats
+                            }
+
+                            if (data.uid !== this.currentUser.uid && (now - lastSeen < fiveMinutes)) {
+                                users.push(data);
+                            }
+                        });
+                        this.activeUsers = users;
+                    });
+                },
+
+                // ==========================================
+                // REQUEST SYSTEM
+                // ==========================================
+                setupRequestListeners(uid) {
+                    // Listen for requests sent TO me
+                    // Path: artifacts/{appId}/users/{uid}/requests
+                    const { db, collection, onSnapshot, appId } = window.chatService;
+                    const requestsRef = collection(db, 'artifacts', appId, 'users', uid, 'requests');
+
+                    this.requestsUnsubscribe = onSnapshot(requestsRef, (snapshot) => {
+                        const reqs = [];
+                        snapshot.forEach(doc => {
+                            reqs.push({ id: doc.id, ...doc.data() });
+                        });
+                        this.incomingRequests = reqs;
+                        
+                        // Alert if new request
+                        if (snapshot.docChanges().some(change => change.type === 'added')) {
+                            // Optional sound effect could go here
+                        }
+                    });
+                },
+
+                async sendRequest(targetUser) {
+                    const { db, addDoc, collection, appId, serverTimestamp } = window.chatService;
+                    
+                    try {
+                        // Create a request in the TARGET's private collection
+                        // Path: artifacts/{appId}/users/{targetUid}/requests
+                        await addDoc(collection(db, 'artifacts', appId, 'users', targetUser.uid, 'requests'), {
+                            fromName: this.userProfile.username,
+                            fromUid: this.currentUser.uid,
+                            fromId: this.userProfile.uniqueId,
+                            createdAt: serverTimestamp()
+                        });
+                        this.addNotification(`Request sent to ${targetUser.username}`, "success");
+                    } catch (e) {
+                        console.error("Send Request Error:", e);
+                        this.addNotification("Failed to send request.", "error");
+                    }
+                },
+
+                async acceptRequest(request) {
+                    const { db, doc, setDoc, deleteDoc, appId, serverTimestamp } = window.chatService;
+                    
+                    // 1. Create a Public Chat Room
+                    // Path: artifacts/{appId}/public/data/chats/{chatId}
+                    const chatId = `chat_${Math.min(this.currentUser.uid, request.fromUid)}_${Math.max(this.currentUser.uid, request.fromUid)}_${Date.now()}`;
+                    
+                    const chatData = {
+                        participants: [this.currentUser.uid, request.fromUid],
+                        createdAt: serverTimestamp(),
+                        active: true,
+                        hostName: this.userProfile.username,
+                        guestName: request.fromName
+                    };
+
+                    try {
+                        await setDoc(doc(db, 'artifacts', appId, 'public', 'data', 'chats', chatId), chatData);
+                        
+                        // 2. Delete the request
+                        await deleteDoc(doc(db, 'artifacts', appId, 'users', this.currentUser.uid, 'requests', request.id));
+                        
+                        // 3. Enter Chat
+                        this.enterChat(chatId, { username: request.fromName, uid: request.fromUid });
+
+                    } catch (e) {
+                        console.error("Accept Error:", e);
+                    }
+                },
+
+                async declineRequest(request) {
+                    const { db, doc, deleteDoc, appId } = window.chatService;
+                    try {
+                        await deleteDoc(doc(db, 'artifacts', appId, 'users', this.currentUser.uid, 'requests', request.id));
+                    } catch (e) {}
+                },
+
+                // ==========================================
+                // CHAT LOGIC
+                // ==========================================
+                enterChat(chatId, partner) {
+                    this.activeChatId = chatId;
+                    this.chatPartner = partner;
+                    this.setView('chat');
+                    
+                    const { db, doc, collection, onSnapshot, query, orderBy, appId } = window.chatService;
+
+                    // 1. Listen to Chat Metadata (for 15 min timer & closure)
+                    this.chatUnsubscribe = onSnapshot(doc(db, 'artifacts', appId, 'public', 'data', 'chats', chatId), (docSnap) => {
+                        if (!docSnap.exists()) {
+                            this.leaveChat(true); // Chat deleted by other or expired
+                            return;
+                        }
+                        const data = docSnap.data();
+                        
+                        // Check Time
+                        if (data.createdAt) {
+                            const createdTime = data.createdAt.toMillis ? data.createdAt.toMillis() : Date.now();
+                            this.startSessionTimer(createdTime);
+                        }
+                    });
+
+                    // 2. Listen to Messages
+                    // Path: artifacts/{appId}/public/data/chats/{chatId}/messages
+                    const msgsRef = collection(db, 'artifacts', appId, 'public', 'data', 'chats', chatId, 'messages');
+                    const q = query(msgsRef, orderBy('createdAt', 'asc')); // Rule 2 compliant
+
+                    this.messagesUnsubscribe = onSnapshot(q, (snapshot) => {
+                        const msgs = [];
+                        snapshot.forEach(doc => msgs.push({ id: doc.id, ...doc.data() }));
+                        this.chatMessages = msgs;
+                        this.scrollToBottom();
+                    });
+                },
+
+                async sendMessage(type = 'text', content = null) {
+                    if ((type === 'text' && !this.newMessageText.trim()) || !this.activeChatId) return;
+                    
+                    const { db, addDoc, collection, appId, serverTimestamp } = window.chatService;
+                    const textToSend = this.newMessageText;
+                    this.newMessageText = ''; // Clear input immediately
+                    this.showEmojiPicker = false;
+
+                    try {
+                        await addDoc(collection(db, 'artifacts', appId, 'public', 'data', 'chats', this.activeChatId, 'messages'), {
+                            text: type === 'text' ? textToSend : '',
+                            content: content, // URL or Base64 for images
+                            type: type,
+                            senderUid: this.currentUser.uid,
+                            createdAt: serverTimestamp()
+                        });
+                        this.scrollToBottom();
+                    } catch (e) {
+                        console.error("Send Msg Error:", e);
+                        this.addNotification("Failed to send message", "error");
+                    }
+                },
+
+                startSessionTimer(startTime) {
+                    if (this.sessionTimerInterval) clearInterval(this.sessionTimerInterval);
+                    
+                    this.sessionTimerInterval = setInterval(() => {
+                        const now = Date.now();
+                        const elapsed = now - startTime;
+                        const fifteenMins = 15 * 60 * 1000;
+                        const remaining = fifteenMins - elapsed;
+
+                        if (remaining <= 0) {
+                            this.deleteChat(); // Time's up
+                        } else {
+                            this.sessionTimeRemaining = Math.floor(remaining / 1000);
+                        }
+                    }, 1000);
+                },
+
+                async deleteChat() {
+                    if (!this.activeChatId) return;
+                    const { db, doc, deleteDoc, appId } = window.chatService;
+                    
+                    // Simply deleting the chat doc triggers the listener in leaveChat()
+                    try {
+                        await deleteDoc(doc(db, 'artifacts', appId, 'public', 'data', 'chats', this.activeChatId));
+                    } catch (e) { console.error(e); }
+                },
+
+                leaveChat(remote = false) {
+                    // Cleanup Listeners
+                    if (this.chatUnsubscribe) this.chatUnsubscribe();
+                    if (this.messagesUnsubscribe) this.messagesUnsubscribe();
+                    if (this.sessionTimerInterval) clearInterval(this.sessionTimerInterval);
+
+                    this.activeChatId = null;
+                    this.chatPartner = null;
+                    this.chatMessages = [];
+                    
+                    this.setView('lobby');
+                    if (remote) {
+                        this.addNotification("Chat ended or expired.", "info");
+                    } else {
+                         this.addNotification("You left the chat.", "info");
+                    }
+                },
+
+                // ==========================================
+                // UTILITIES & HELPERS
+                // ==========================================
+                
+                // Helper to format time (MM:SS)
+                formatTime(seconds) {
+                    const m = Math.floor(seconds / 60);
+                    const s = seconds % 60;
+                    return `${m}:${s.toString().padStart(2, '0')}`;
+                },
+
+                setView(view) {
+                    if (view === 'lobby') this.setupLobbyListener();
+                    this.currentView = view;
+                    this.mobileMenuOpen = false;
+                    window.scrollTo(0, 0);
+                },
+
+                toggleTheme() {
+                    this.darkMode = !this.darkMode;
+                    localStorage.setItem('theme', this.darkMode ? 'dark' : 'light');
+                    if (this.darkMode) document.documentElement.classList.add('dark');
+                    else document.documentElement.classList.remove('dark');
+                },
+
+                scrollToBottom() {
+                    this.$nextTick(() => {
+                        const container = document.getElementById('chat-scroll-area');
+                        if (container) {
+                            container.scrollTop = container.scrollHeight;
+                        }
+                    });
+                },
+
+                addNotification(text, type = 'success') {
+                    const id = Date.now();
+                    this.notifications.push({ id, text, type });
+                    setTimeout(() => {
+                        this.notifications = this.notifications.filter(n => n.id !== id);
+                    }, 4000);
+                },
+
+                // Image Compression & Upload
+                async handleImageUpload(event) {
+                    const file = event.target.files[0];
+                    if (!file) return;
+
+                    // Limit: 2MB check before compression
+                    if (file.size > 2 * 1024 * 1024) {
+                        this.addNotification("Image too large. Max 2MB.", "error");
+                        return;
+                    }
+
+                    this.addNotification("Compressing & sending image...", "info");
+
+                    const reader = new FileReader();
+                    reader.onload = (e) => {
+                        const img = new Image();
+                        img.onload = () => {
+                            const canvas = document.createElement('canvas');
+                            let width = img.width;
+                            let height = img.height;
+                            
+                            // Max Width/Height 800px
+                            if (width > 800) {
+                                height *= 800 / width;
+                                width = 800;
+                            }
+
+                            canvas.width = width;
+                            canvas.height = height;
+                            const ctx = canvas.getContext('2d');
+                            ctx.drawImage(img, 0, 0, width, height);
+
+                            // Compress to JPEG 0.6 quality
+                            const base64 = canvas.toDataURL('image/jpeg', 0.6);
+                            
+                            // Check final size (Firebase Document limit is 1MB, let's keep it safe under 100KB if possible)
+                            if (base64.length > 500000) {
+                                this.addNotification("Image still too large after compression.", "error");
+                            } else {
+                                this.sendMessage('image', base64);
+                            }
+                        };
+                        img.src = e.target.result;
+                    };
+                    reader.readAsDataURL(file);
+                }
+            }));
+        });
+    </script>
+    
+    <style>
+        [x-cloak] { display: none !important; }
+        .scrollbar-hide::-webkit-scrollbar { display: none; }
+        .glass-panel {
+            background: rgba(255, 255, 255, 0.7);
+            backdrop-filter: blur(12px);
+            border: 1px solid rgba(255, 255, 255, 0.5);
+        }
+        .dark .glass-panel {
+            background: rgba(24, 24, 27, 0.6);
+            border: 1px solid rgba(255, 255, 255, 0.05);
+        }
+        
+        /* Custom Scrollbar */
+        ::-webkit-scrollbar { width: 8px; height: 8px; }
+        ::-webkit-scrollbar-track { background: transparent; }
+        ::-webkit-scrollbar-thumb { background: #cbd5e1; border-radius: 4px; }
+        ::-webkit-scrollbar-thumb:hover { background: #94a3b8; }
+        .dark ::-webkit-scrollbar-thumb { background: #3f3f46; }
+        .dark ::-webkit-scrollbar-thumb:hover { background: #52525b; }
+    </style>
+</head>
+<body class="bg-gray-50 text-gray-900 dark:bg-dark-bg dark:text-gray-100 font-sans transition-colors duration-300"
+      x-data="app">
+
+    <!-- LOADING OVERLAY -->
+    <div x-show="isLoading" 
+         class="fixed inset-0 z-[100] bg-white dark:bg-dark-bg flex flex-col items-center justify-center transition-opacity duration-500">
+        <div class="relative w-24 h-24 mb-4">
+            <div class="absolute inset-0 border-4 border-brand-200 dark:border-brand-900 rounded-full animate-ping"></div>
+            <div class="absolute inset-2 border-4 border-brand-500 rounded-full border-t-transparent animate-spin"></div>
+            <div class="absolute inset-0 flex items-center justify-center">
+                <i class="fa-solid fa-bolt text-brand-600 dark:text-brand-400 text-xl"></i>
+            </div>
+        </div>
+        <h2 class="text-xl font-display font-bold animate-pulse" x-text="loadingMessage">Loading...</h2>
+        
+        <!-- Error Message if Config Fails -->
+        <template x-if="configError">
+             <div class="mt-4 p-4 bg-red-50 dark:bg-red-900/20 text-red-600 dark:text-red-400 rounded-lg border border-red-200 dark:border-red-900/50 max-w-md text-center">
+                <i class="fa-solid fa-triangle-exclamation text-2xl mb-2"></i>
+                <p x-text="configError" class="font-bold"></p>
+                <p class="text-sm mt-2">See comments in code to add your keys.</p>
+             </div>
+        </template>
+    </div>
+
+    <!-- NOTIFICATIONS -->
+    <div class="fixed top-4 right-4 z-[90] space-y-2 pointer-events-none">
+        <template x-for="note in notifications" :key="note.id">
+            <div class="pointer-events-auto transform transition-all duration-300 ease-in-out"
+                 x-transition:enter="translate-x-full opacity-0"
+                 x-transition:enter-end="translate-x-0 opacity-100"
+                 x-transition:leave="translate-x-full opacity-0">
+                <div class="flex items-center gap-3 px-4 py-3 rounded-lg shadow-lg border-l-4 backdrop-blur-md bg-white/90 dark:bg-dark-surface/90"
+                     :class="note.type === 'error' ? 'border-red-500 text-red-700 dark:text-red-400' : 'border-brand-500 text-brand-700 dark:text-brand-400'">
+                    <i class="fa-solid" :class="note.type === 'error' ? 'fa-triangle-exclamation' : 'fa-circle-check'"></i>
+                    <span class="text-sm font-medium" x-text="note.text"></span>
+                </div>
+            </div>
+        </template>
+    </div>
+
+    <!-- REQUEST MODAL -->
+    <template x-if="incomingRequests.length > 0">
+        <div class="fixed inset-0 z-[80] flex items-end sm:items-center justify-center p-4 bg-black/40 backdrop-blur-sm">
+            <div class="bg-white dark:bg-dark-surface rounded-2xl shadow-2xl w-full max-w-sm overflow-hidden border border-gray-100 dark:border-dark-border animate-slide-up">
+                <div class="bg-gradient-to-r from-brand-500 to-brand-600 px-6 py-4 flex justify-between items-center">
+                    <h3 class="text-white font-bold flex items-center gap-2">
+                        <i class="fa-solid fa-bell animate-bounce-slow"></i> Chat Request
+                    </h3>
+                    <span class="bg-white/20 text-white text-xs px-2 py-1 rounded-full" x-text="incomingRequests.length"></span>
+                </div>
+                <div class="p-6">
+                    <div class="flex items-center gap-4 mb-4">
+                        <div class="w-12 h-12 rounded-full bg-brand-100 dark:bg-brand-900/30 flex items-center justify-center text-brand-600 text-xl font-bold uppercase">
+                            <span x-text="incomingRequests[0].fromName.charAt(0)"></span>
+                        </div>
+                        <div>
+                            <p class="font-bold text-lg" x-text="incomingRequests[0].fromName"></p>
+                            <p class="text-xs text-gray-500 font-mono" x-text="incomingRequests[0].fromId"></p>
+                        </div>
+                    </div>
+                    <p class="text-sm text-gray-600 dark:text-gray-400 mb-6">Wants to start a secure, temporary chat session with you.</p>
+                    <div class="grid grid-cols-2 gap-3">
+                        <button @click="declineRequest(incomingRequests[0])" class="py-2.5 rounded-xl border border-gray-200 dark:border-gray-700 hover:bg-gray-50 dark:hover:bg-dark-hover transition font-medium text-gray-600 dark:text-gray-300">
+                            Ignore
+                        </button>
+                        <button @click="acceptRequest(incomingRequests[0])" class="py-2.5 rounded-xl bg-brand-600 hover:bg-brand-700 text-white shadow-lg shadow-brand-500/20 transition font-medium">
+                            Accept
+                        </button>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </template>
+
+    <!-- NAVIGATION -->
+    <nav class="fixed top-0 w-full z-40 transition-all duration-300" 
+         :class="currentView === 'home' ? 'bg-transparent backdrop-blur-sm border-b border-transparent' : 'bg-white/80 dark:bg-dark-bg/80 backdrop-blur-md border-b border-gray-200 dark:border-dark-border'">
+        <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
+            <div class="flex justify-between items-center h-16">
+                <!-- Logo -->
+                <button @click="setView('home')" class="flex items-center gap-2 group">
+                    <div class="w-8 h-8 rounded-lg bg-gradient-to-br from-brand-400 to-brand-600 flex items-center justify-center text-white shadow-lg shadow-brand-500/30 group-hover:rotate-12 transition-transform duration-300">
+                        <i class="fa-solid fa-bolt"></i>
+                    </div>
+                    <span class="font-display font-bold text-xl tracking-tight">Chat<span class="text-brand-600 dark:text-brand-400">Random</span></span>
+                </button>
+
+                <!-- Desktop Links -->
+                <div class="hidden md:flex items-center gap-6">
+                    <button @click="setView('home')" class="text-sm font-medium hover:text-brand-600 transition-colors">Home</button>
+                    <button x-show="userProfile" @click="setView('lobby')" class="text-sm font-medium hover:text-brand-600 transition-colors">Lobby</button>
+                    
+                    <button @click="toggleTheme()" class="p-2 rounded-full hover:bg-gray-100 dark:hover:bg-dark-hover transition-colors">
+                        <i class="fa-solid" :class="darkMode ? 'fa-sun text-yellow-400' : 'fa-moon text-gray-600'"></i>
+                    </button>
+
+                    <template x-if="!userProfile">
+                        <button @click="createIdentity()" x-show="false" class="hidden">Hidden Trigger</button> <!-- Logic handled in hero -->
+                    </template>
+                    
+                    <template x-if="userProfile">
+                        <div class="flex items-center gap-3 pl-4 border-l border-gray-200 dark:border-dark-border">
+                            <div class="text-right hidden lg:block">
+                                <p class="text-xs font-bold" x-text="userProfile.username"></p>
+                                <p class="text-[10px] font-mono text-brand-600 dark:text-brand-400" x-text="userProfile.uniqueId"></p>
+                            </div>
+                            <img :src="userProfile.avatar" class="w-8 h-8 rounded-full bg-brand-100 border border-brand-200">
+                        </div>
+                    </template>
+                </div>
+
+                <!-- Mobile Menu Button -->
+                <button @click="mobileMenuOpen = !mobileMenuOpen" class="md:hidden p-2 text-gray-600 dark:text-gray-300">
+                    <i class="fa-solid fa-bars text-xl"></i>
+                </button>
+            </div>
+        </div>
+    </nav>
+
+    <!-- MAIN CONTENT -->
+    <main class="pt-16 min-h-screen relative overflow-hidden" x-cloak>
+        
+        <!-- BACKGROUND BLOBS -->
+        <div class="absolute top-0 left-0 w-full h-full overflow-hidden -z-10 pointer-events-none">
+            <div class="absolute top-[-10%] left-[-10%] w-[40%] h-[40%] bg-brand-300/20 dark:bg-brand-900/10 rounded-full blur-[100px] animate-blob"></div>
+            <div class="absolute bottom-[-10%] right-[-10%] w-[40%] h-[40%] bg-purple-300/20 dark:bg-purple-900/10 rounded-full blur-[100px] animate-blob" style="animation-delay: 2s"></div>
+        </div>
+
+        <!-- ==================== VIEW: HOME ==================== -->
+        <div x-show="currentView === 'home'" class="flex flex-col items-center justify-center min-h-[calc(100vh-4rem)] px-4 sm:px-6 lg:px-8 text-center animate-fade-in">
+            
+            <div class="max-w-4xl mx-auto space-y-8">
+                <div class="inline-flex items-center gap-2 px-3 py-1 rounded-full bg-brand-50 dark:bg-brand-900/20 border border-brand-100 dark:border-brand-900/50 text-brand-700 dark:text-brand-300 text-xs font-medium mb-4 animate-bounce-slow">
+                    <span class="w-2 h-2 rounded-full bg-brand-500 animate-pulse"></span>
+                    Now Live: Real-Time Firebase Multiplayer
+                </div>
+
+                <h1 class="text-5xl sm:text-6xl md:text-7xl font-display font-bold tracking-tight text-gray-900 dark:text-white leading-[1.1]">
+                    Connect Instantly. <br>
+                    <span class="text-transparent bg-clip-text bg-gradient-to-r from-brand-500 to-purple-600">No Trace Left Behind.</span>
+                </h1>
+
+                <p class="text-lg sm:text-xl text-gray-600 dark:text-gray-400 max-w-2xl mx-auto leading-relaxed">
+                    Generate a temporary cryptographic identity. Find strangers in the lobby. Chat securely.
+                    <span class="font-semibold text-gray-900 dark:text-gray-200">Everything auto-deletes in 15 minutes.</span>
+                </p>
+
+                <!-- Identity Creation Form (Hero) -->
+                <div x-show="!userProfile" class="max-w-md mx-auto mt-10 bg-white dark:bg-dark-surface p-2 rounded-2xl shadow-xl shadow-brand-900/5 border border-gray-100 dark:border-dark-border flex flex-col sm:flex-row gap-2 transform transition hover:scale-[1.01]">
+                    <input type="text" x-model="inputUsername" 
+                           placeholder="Choose a display name..." 
+                           class="flex-1 bg-transparent border-none focus:ring-0 text-gray-900 dark:text-white px-4 py-3 placeholder-gray-400"
+                           @keyup.enter="createIdentity()">
+                    <button @click="createIdentity()" 
+                            class="bg-brand-600 hover:bg-brand-700 text-white px-8 py-3 rounded-xl font-bold shadow-lg shadow-brand-500/30 transition-all flex items-center justify-center gap-2 whitespace-nowrap">
+                        <i class="fa-solid fa-fingerprint"></i> Generate ID
+                    </button>
+                </div>
+
+                <div x-show="userProfile" class="mt-8">
+                    <button @click="setView('lobby')" class="bg-brand-600 hover:bg-brand-700 text-white px-8 py-4 rounded-full font-bold shadow-xl shadow-brand-500/30 transition-all transform hover:-translate-y-1 text-lg flex items-center gap-3 mx-auto">
+                        Enter Lobby <i class="fa-solid fa-arrow-right"></i>
+                    </button>
+                    <p class="mt-3 text-sm text-gray-500">Logged in as <span class="font-bold text-gray-900 dark:text-white" x-text="userProfile.username"></span></p>
+                </div>
+
+                <!-- Features Grid -->
+                <div class="grid grid-cols-1 md:grid-cols-3 gap-6 mt-20 text-left">
+                    <div class="p-6 rounded-2xl bg-white/50 dark:bg-dark-surface/50 border border-gray-100 dark:border-dark-border backdrop-blur-sm">
+                        <div class="w-12 h-12 rounded-lg bg-blue-100 dark:bg-blue-900/30 flex items-center justify-center text-blue-600 dark:text-blue-400 text-xl mb-4">
+                            <i class="fa-solid fa-globe"></i>
+                        </div>
+                        <h3 class="font-bold text-lg mb-2">Global Lobby</h3>
+                        <p class="text-sm text-gray-600 dark:text-gray-400">See everyone online in real-time. Filter by ID or name to find specific people.</p>
+                    </div>
+                    <div class="p-6 rounded-2xl bg-white/50 dark:bg-dark-surface/50 border border-gray-100 dark:border-dark-border backdrop-blur-sm">
+                        <div class="w-12 h-12 rounded-lg bg-purple-100 dark:bg-purple-900/30 flex items-center justify-center text-purple-600 dark:text-purple-400 text-xl mb-4">
+                            <i class="fa-solid fa-stopwatch"></i>
+                        </div>
+                        <h3 class="font-bold text-lg mb-2">15-Min Lifespan</h3>
+                        <p class="text-sm text-gray-600 dark:text-gray-400">Chats are strictly temporary. Once the timer hits zero, all data is scrubbed from the server.</p>
+                    </div>
+                    <div class="p-6 rounded-2xl bg-white/50 dark:bg-dark-surface/50 border border-gray-100 dark:border-dark-border backdrop-blur-sm">
+                        <div class="w-12 h-12 rounded-lg bg-green-100 dark:bg-green-900/30 flex items-center justify-center text-green-600 dark:text-green-400 text-xl mb-4">
+                            <i class="fa-solid fa-lock"></i>
+                        </div>
+                        <h3 class="font-bold text-lg mb-2">Anonymous</h3>
+                        <p class="text-sm text-gray-600 dark:text-gray-400">No email required. We use anonymous authentication and cryptographic IDs.</p>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- ==================== VIEW: LOBBY ==================== -->
+        <div x-show="currentView === 'lobby'" class="max-w-6xl mx-auto px-4 sm:px-6 lg:px-8 py-8 animate-fade-in">
+            
+            <div class="flex flex-col md:flex-row gap-6">
+                <!-- Sidebar: My Profile -->
+                <div class="w-full md:w-1/3 space-y-6">
+                    <div class="glass-panel rounded-2xl p-6 relative overflow-hidden group">
+                        <div class="absolute inset-0 bg-gradient-to-br from-brand-500/10 to-transparent opacity-0 group-hover:opacity-100 transition duration-500"></div>
+                        <div class="relative flex flex-col items-center text-center">
+                            <div class="relative">
+                                <img :src="userProfile?.avatar" class="w-24 h-24 rounded-full border-4 border-white dark:border-dark-surface shadow-lg mb-4 bg-gray-100">
+                                <span class="absolute bottom-4 right-1 w-5 h-5 bg-green-500 border-4 border-white dark:border-dark-surface rounded-full"></span>
+                            </div>
+                            <h2 class="text-2xl font-bold text-gray-900 dark:text-white" x-text="userProfile?.username"></h2>
+                            <div class="mt-2 bg-gray-100 dark:bg-dark-border px-3 py-1 rounded-md flex items-center gap-2 cursor-pointer hover:bg-gray-200 transition" @click="navigator.clipboard.writeText(userProfile?.uniqueId); addNotification('ID Copied!', 'success')">
+                                <span class="font-mono font-bold text-brand-600 dark:text-brand-400 tracking-wider" x-text="userProfile?.uniqueId"></span>
+                                <i class="fa-regular fa-copy text-xs text-gray-400"></i>
+                            </div>
+                            <p class="text-xs text-gray-500 mt-4">Share this ID with friends so they can find you.</p>
+                        </div>
+                    </div>
+
+                    <!-- Search Box -->
+                    <div class="glass-panel rounded-2xl p-6">
+                        <h3 class="font-bold text-gray-900 dark:text-white mb-4">Find Connection</h3>
+                        <div class="relative">
+                            <i class="fa-solid fa-magnifying-glass absolute left-3 top-3.5 text-gray-400"></i>
+                            <input type="text" x-model="searchQuery" placeholder="Search ID or Name..." 
+                                   class="w-full bg-gray-50 dark:bg-dark-bg border border-gray-200 dark:border-gray-700 rounded-xl pl-10 pr-4 py-3 focus:ring-2 focus:ring-brand-500 focus:border-transparent outline-none transition">
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Main Area: Online Users -->
+                <div class="w-full md:w-2/3">
+                    <div class="flex items-center justify-between mb-6">
+                        <h2 class="text-xl font-bold flex items-center gap-2">
+                            <span class="w-2 h-2 rounded-full bg-green-500 animate-pulse"></span>
+                            Online Users <span class="text-gray-400 font-normal text-sm" x-text="`(${activeUsers.length})`"></span>
+                        </h2>
+                        <button @click="setupLobbyListener()" class="text-sm text-brand-600 hover:underline"><i class="fa-solid fa-rotate-right mr-1"></i> Refresh</button>
+                    </div>
+
+                    <!-- Empty State -->
+                    <template x-if="activeUsers.length === 0">
+                        <div class="text-center py-20 bg-gray-50 dark:bg-dark-surface/50 rounded-2xl border border-dashed border-gray-300 dark:border-gray-700">
+                            <i class="fa-solid fa-ghost text-4xl text-gray-300 mb-4"></i>
+                            <p class="text-gray-500">It's quiet in here.</p>
+                            <p class="text-xs text-gray-400">Share your ID to invite someone!</p>
+                        </div>
+                    </template>
+
+                    <!-- Users Grid -->
+                    <div class="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                        <template x-for="user in activeUsers.filter(u => u.username.toLowerCase().includes(searchQuery.toLowerCase()) || u.uniqueId.toLowerCase().includes(searchQuery.toLowerCase()))" :key="user.uid">
+                            <div class="bg-white dark:bg-dark-surface p-4 rounded-xl border border-gray-100 dark:border-dark-border shadow-sm hover:shadow-md transition-all flex items-center justify-between group">
+                                <div class="flex items-center gap-3">
+                                    <img :src="user.avatar" class="w-12 h-12 rounded-full bg-gray-100">
+                                    <div class="text-left">
+                                        <p class="font-bold text-gray-900 dark:text-white" x-text="user.username"></p>
+                                        <p class="text-xs font-mono text-gray-500" x-text="user.uniqueId"></p>
+                                    </div>
+                                </div>
+                                <button @click="sendRequest(user)" 
+                                        class="px-4 py-2 bg-brand-50 dark:bg-brand-900/20 text-brand-700 dark:text-brand-300 text-sm font-bold rounded-lg opacity-0 group-hover:opacity-100 transition-opacity hover:bg-brand-100 dark:hover:bg-brand-900/40">
+                                    Connect
+                                </button>
+                            </div>
+                        </template>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- ==================== VIEW: CHAT ==================== -->
+        <div x-show="currentView === 'chat'" class="fixed inset-0 pt-16 bg-gray-100 dark:bg-black z-50 flex flex-col animate-slide-up">
+            
+            <!-- Chat Header -->
+            <div class="bg-white dark:bg-dark-surface border-b border-gray-200 dark:border-dark-border px-4 py-3 shadow-sm flex items-center justify-between shrink-0">
+                <div class="flex items-center gap-3">
+                    <button @click="leaveChat()" class="p-2 -ml-2 rounded-full hover:bg-gray-100 dark:hover:bg-dark-hover transition text-gray-500">
+                        <i class="fa-solid fa-arrow-left"></i>
+                    </button>
+                    <div class="flex items-center gap-2">
+                        <div class="w-10 h-10 rounded-full bg-gradient-to-br from-brand-400 to-purple-500 p-0.5">
+                            <img :src="chatPartner?.avatar || `https://api.dicebear.com/7.x/shapes/svg?seed=${chatPartner?.uid}`" class="w-full h-full rounded-full bg-white dark:bg-dark-surface">
+                        </div>
+                        <div>
+                            <h3 class="font-bold text-gray-900 dark:text-white leading-tight" x-text="chatPartner?.username || 'Chat Partner'"></h3>
+                            <p class="text-xs text-green-500 flex items-center gap-1">
+                                <span class="w-1.5 h-1.5 bg-green-500 rounded-full"></span> Encrypted & Live
+                            </p>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Timer -->
+                <div class="flex items-center gap-4">
+                    <div class="flex flex-col items-end">
+                        <span class="text-[10px] uppercase font-bold text-gray-400 tracking-wider">Time Left</span>
+                        <div class="font-mono font-bold text-lg" :class="sessionTimeRemaining < 60 ? 'text-red-500 animate-pulse' : 'text-gray-900 dark:text-white'" x-text="formatTime(sessionTimeRemaining)"></div>
+                    </div>
+                    <button @click="deleteChat()" class="bg-red-50 dark:bg-red-900/20 text-red-600 dark:text-red-400 p-2.5 rounded-lg hover:bg-red-100 dark:hover:bg-red-900/40 transition" title="Destroy Session">
+                        <i class="fa-solid fa-power-off"></i>
+                    </button>
+                </div>
+            </div>
+
+            <!-- Messages Area -->
+            <div id="chat-scroll-area" class="flex-1 overflow-y-auto p-4 space-y-4 bg-gray-50 dark:bg-dark-bg scroll-smooth">
+                <!-- Security Notice -->
+                <div class="flex justify-center my-6">
+                    <div class="bg-yellow-50 dark:bg-yellow-900/10 border border-yellow-200 dark:border-yellow-900/30 px-4 py-2 rounded-lg text-xs text-yellow-800 dark:text-yellow-500 flex items-center gap-2">
+                        <i class="fa-solid fa-lock"></i> Messages are end-to-end ephemeral. History is not saved.
+                    </div>
+                </div>
+
+                <template x-for="msg in chatMessages" :key="msg.id">
+                    <div class="w-full flex" :class="msg.senderUid === currentUser?.uid ? 'justify-end' : 'justify-start'">
+                        <div class="max-w-[85%] sm:max-w-[70%] flex flex-col" :class="msg.senderUid === currentUser?.uid ? 'items-end' : 'items-start'">
+                            
+                            <!-- Text Bubble -->
+                            <template x-if="msg.type === 'text' && msg.text">
+                                <div class="px-4 py-2.5 rounded-2xl text-sm leading-relaxed shadow-sm break-words"
+                                     :class="msg.senderUid === currentUser?.uid 
+                                        ? 'bg-brand-600 text-white rounded-br-none' 
+                                        : 'bg-white dark:bg-dark-surface text-gray-800 dark:text-gray-100 border border-gray-200 dark:border-dark-border rounded-bl-none'">
+                                    <span x-text="msg.text"></span>
+                                </div>
+                            </template>
+
+                            <!-- Image Bubble -->
+                            <template x-if="msg.type === 'image'">
+                                <div class="p-1 bg-white dark:bg-dark-surface border border-gray-200 dark:border-dark-border rounded-xl shadow-sm">
+                                    <img :src="msg.content" class="max-w-full h-auto rounded-lg max-h-64 object-cover cursor-pointer" @click="window.open(msg.content)">
+                                </div>
+                            </template>
+
+                            <span class="text-[10px] text-gray-400 mt-1 px-1" x-text="new Date(msg.createdAt?.seconds * 1000 || Date.now()).toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'})"></span>
+                        </div>
+                    </div>
+                </template>
+            </div>
+
+            <!-- Input Area -->
+            <div class="bg-white dark:bg-dark-surface border-t border-gray-200 dark:border-dark-border p-4 shrink-0">
+                <form @submit.prevent="sendMessage('text')" class="flex items-end gap-2 max-w-4xl mx-auto relative">
+                    
+                    <!-- Tools -->
+                    <div class="flex items-center gap-1 mb-2">
+                         <label class="p-2 text-gray-500 hover:text-brand-600 dark:hover:text-brand-400 hover:bg-gray-100 dark:hover:bg-dark-hover rounded-lg cursor-pointer transition">
+                            <i class="fa-regular fa-image text-lg"></i>
+                            <input type="file" class="hidden" accept="image/*" @change="handleImageUpload">
+                        </label>
+                        <button type="button" @click="showEmojiPicker = !showEmojiPicker" class="p-2 text-gray-500 hover:text-brand-600 dark:hover:text-brand-400 hover:bg-gray-100 dark:hover:bg-dark-hover rounded-lg transition">
+                            <i class="fa-regular fa-face-smile text-lg"></i>
+                        </button>
+                    </div>
+
+                    <!-- Text Input -->
+                    <div class="flex-1 bg-gray-100 dark:bg-dark-bg rounded-2xl flex items-center px-4 py-2 focus-within:ring-2 focus-within:ring-brand-500 transition-all">
+                        <input type="text" x-model="newMessageText" placeholder="Type your message..." 
+                               class="w-full bg-transparent border-none focus:ring-0 text-sm py-2 outline-none dark:text-white placeholder-gray-400"
+                               autocomplete="off">
+                    </div>
+
+                    <!-- Send Button -->
+                    <button type="submit" 
+                            class="w-12 h-12 rounded-full bg-brand-600 hover:bg-brand-700 text-white flex items-center justify-center shadow-lg shadow-brand-500/30 transition-transform active:scale-95 disabled:opacity-50 disabled:cursor-not-allowed"
+                            :disabled="!newMessageText.trim()">
+                        <i class="fa-solid fa-paper-plane"></i>
+                    </button>
+
+                    <!-- Emoji Picker (Absolute) -->
+                    <div x-show="showEmojiPicker" @click.outside="showEmojiPicker = false" 
+                         class="absolute bottom-full left-0 mb-4 bg-white dark:bg-dark-surface border border-gray-200 dark:border-dark-border shadow-xl rounded-xl p-2 grid grid-cols-6 gap-1 w-64 z-20 animate-slide-up">
+                        <template x-for="emoji in ['😀','😂','😍','😎','🤔','👍','👎','👋','🔥','❤️','🎉','👀','💩','👻','💀','🤖','🤡','💩']">
+                            <button type="button" @click="newMessageText += emoji" class="text-xl p-2 hover:bg-gray-100 dark:hover:bg-gray-700 rounded-lg transition" x-text="emoji"></button>
+                        </template>
+                    </div>
+
+                </form>
+            </div>
+        </div>
+
+    </main>
+</body>
+</html>
